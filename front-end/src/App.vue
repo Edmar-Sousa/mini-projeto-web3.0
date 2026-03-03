@@ -1,6 +1,16 @@
 <template>
 
     <main class="w-screen min-h-screen p-10 flex items-center justify-center flex-col">
+        <div class="mb-4">
+            <p v-if="isWalletNotConnected" class="py-4 px-10 bg-amber-200 border border-amber-400 rounded-2xl">
+                Para usar esse aplicativo, conecte sua carteira Ethereum.
+            </p>
+
+            <p v-if="isWalletError" class="py-4 px-10 bg-red-200 border border-red-400 rounded-2xl">
+                {{ errorContract?.message }}
+            </p>
+        </div>
+
         <div class="mx-auto w-full max-w-300 flex flex-col items-center justify-center md:flex-row-reverse">
             <div class="w-full">
                 <img 
@@ -12,9 +22,9 @@
             <file-upload v-model="file" />
         </div>
 
-        <div v-if="hasFile">
+        <div v-if="hasFile && !isWalletError && !isWalletNotConnected">
 
-            <template v-if="!isUploading && !cid">
+            <template v-if="isIdle">
                 <button 
                     @click="handlerUpload"
                     :disabled="isUploading"
@@ -30,17 +40,13 @@
                 </div>
             </template>
 
-            <template v-else-if="error">
+            <template v-else-if="isError">
                 <p class="text-base font-normal text-center text-red-500">
-                    Ocorreu um erro ao enviar o arquivo: {{ error.message }}
+                    Ocorreu um erro ao enviar o arquivo: {{ error?.message }}
                 </p>
             </template>
 
-            <template v-else-if="cid">
-                <p class="text-base font-normal text-center">
-                    Arquivo enviado com sucesso! CID: {{ cid }}
-                </p>
-            </template>
+            
         </div>
     </main>
 
@@ -53,21 +59,44 @@ import { ref, computed } from 'vue';
 import FileImage from './assets/files.png'
 import FileUpload from './components/FileUpload.vue';
 
-import { useIPFSUpload } from './composable/useIPFSUpload';
+import { useRegisterCertificate, StateConnection } from './composable/useRegisteCertificate';
+import { useIPFSUpload, UploadStatus } from './composable/useIPFSUpload';
 
 
 const file = ref<File | null>(null);
 const progress = ref(0);
 
 const hasFile = computed(() => file.value !== null);
+const isIdle = computed(() => state.value === UploadStatus.IDLE);
+const isError = computed(() => state.value === UploadStatus.ERROR);
+const isUploading = computed(() => state.value === UploadStatus.UPLOADING);
 
+const isWalletNotConnected = computed(() => connectionState.value === StateConnection.NOT_CONNECTED);
+const isWalletError = computed(() => connectionState.value === StateConnection.ERROR);
 
 const {
-    cid,
     error,
-    isUploading,
     uploadFile,
+    state,
 } = useIPFSUpload();
+
+const {
+    error: errorContract,
+    connectionState,
+    connectWallet,
+} = useRegisterCertificate();
+
+function handlerProgress(bytes: number) {
+    if (!file.value) {
+        return;
+    }
+
+    progress.value = Math.round(bytes / file.value.size * 100);
+}
+
+function handlerFinishUpload(cidValue: string) {
+
+}
 
 function handlerUpload() {
     if (!file.value) {
@@ -76,8 +105,12 @@ function handlerUpload() {
 
     uploadFile({
         file: file.value,
-        onProgress: (bytes) => progress.value = Math.round(bytes / file.value?.size! * 100),
+        onProgress: handlerProgress,
+        onFinish: handlerFinishUpload,
     });
 }
+
+
+connectWallet();
 
 </script>

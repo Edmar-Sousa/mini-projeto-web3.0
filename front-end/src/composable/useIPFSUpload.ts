@@ -11,10 +11,21 @@ import { create } from 'ipfs-http-client'
 
 const ipfsURL = import.meta.env.VITE_IPFS_URL || 'http://127.0.0.1:5001/api/v0'
 
+export const UploadStatus = {
+    IDLE: 'idle',
+    UPLOADING: 'uploading',
+    WRITE_BLOCKCHAIN: 'write_blockchain',
+    SUCCESS: 'success',
+    ERROR: 'error',
+} as const;
+
+export type UploadStatusType = (typeof UploadStatus)[keyof typeof UploadStatus];
+
 
 type UploadFileType = {
     file: File | Ref<File> | ComputedRef<File> | ModelRef<File>,
     onProgress?: (progress: number) => void
+    onFinish?: (cid: string) => void
 }
 
 
@@ -24,58 +35,79 @@ export function useIPFSUpload() {
     });
 
     // states
-    const isUploading = ref(false);
     const isError = ref(false);
     const error = ref<Error | null>(null);
+
+    const state = ref<UploadStatusType>(UploadStatus.IDLE);
     
     // values
     const cid = ref<string | null>(null);
 
 
+    const uploadFileToIPFS = async (file: File, onProgress?: (bytes: number) => void) => {
+        const added = await ipfs.add(file, {
+            progress: (bytes) => {
+                if (onProgress) {
+                    onProgress(bytes);
+                }
+            },
+        });
+
+        const cid = added.cid.toString();
+
+        await ipfs.files.write(
+            `/ipfs/${cid}`, 
+            file, 
+            { create: true, parents: true }
+        );
+
+        return cid;
+    }
+
+
+
     const uploadFile = async (options: UploadFileType) => {
         const { 
             file, 
-            onProgress 
+            onProgress,
+            onFinish,
         } = options;
 
         const rawFile = toValue(file);
 
-        isUploading.value = true;
-        isError.value = false;
+        state.value = UploadStatus.UPLOADING;
 
         try {
-            const added = await ipfs.add(rawFile, {
-                progress: (bytes) => {
-                    if (onProgress) {
-                        onProgress(bytes);
-                    }
-                },
-            });
-    
-            await ipfs.files.write(`/ipfs/${added.cid.toString()}`, rawFile, { create: true, parents: true });
 
-            cid.value = added.cid.toString();
+            const cidValue = await uploadFileToIPFS(
+                rawFile, 
+                onProgress
+            );
+
+            
+            cid.value = cidValue;
+            state.value = UploadStatus.SUCCESS;
+            
+            if (onFinish) {
+                onFinish(cidValue);
+            }
         }
 
         catch (err) {
-            isError.value = true;
+            state.value = UploadStatus.ERROR;
             error.value = err as Error;
-        }
-
-        finally {
-            isUploading.value = false;
         }
 
     }
 
     return {
         // states
-        isUploading,
         isError,
         error,
 
         // values
         cid,
+        state,
         
         // functions
         uploadFile,
